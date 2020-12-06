@@ -21,6 +21,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <taiwins/objects/vulkan.h>
 #include <vulkan/vulkan_core.h>
@@ -48,6 +49,24 @@ static const char *basic_vk_exts[] = {
 	VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
 };
 
+static const char *basic_dev_exts[] = {
+	VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
+	VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+	VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
+	VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME,
+	VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,
+};
+
+static const char *dma_modifiers_exts[] = {
+	VK_KHR_BIND_MEMORY_2_EXTENSION_NAME,
+	VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME,
+	/* minor features that were intentionally left out in vk 1.0 */
+	VK_KHR_MAINTENANCE1_EXTENSION_NAME,
+	VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
+	VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,
+	VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
+};
+
 static bool
 layer_supported(const char *layer_name)
 {
@@ -64,6 +83,30 @@ layer_supported(const char *layer_name)
         return false;
 }
 
+static int
+ext_names_cmp(const void *_a, const void *_b)
+{
+	const VkExtensionProperties *a = _a;
+	const VkExtensionProperties *b = _b;
+	return strcmp(a->extensionName, b->extensionName);
+}
+
+static int
+is_ext_name(const void *_a, const void *_b)
+{
+	const char *a = _a;
+	const VkExtensionProperties *b = _b;
+	return strcmp(a, b->extensionName);
+}
+
+static inline bool
+check_ext(const char *requested, int n_ext, VkExtensionProperties *ext_p)
+{
+	void *found = bsearch(requested, ext_p, n_ext,
+	                      sizeof(VkExtensionProperties), is_ext_name);
+	return found != 0;
+}
+
 static size_t
 enum_instance_exts(char *exts[MAX_EXTS], const struct tw_vk_option *opts)
 {
@@ -71,6 +114,7 @@ enum_instance_exts(char *exts[MAX_EXTS], const struct tw_vk_option *opts)
 	vkEnumerateInstanceExtensionProperties(NULL, &n_found_exts, NULL);
 	VkExtensionProperties has_exts[n_found_exts+1];
 	vkEnumerateInstanceExtensionProperties(NULL, &n_found_exts, has_exts);
+	qsort(has_exts, n_found_exts, sizeof(has_exts[0]), ext_names_cmp);
 
 	//basic exts need to be supported
 	memcpy(exts, basic_vk_exts, sizeof(basic_vk_exts));
@@ -83,17 +127,45 @@ enum_instance_exts(char *exts[MAX_EXTS], const struct tw_vk_option *opts)
 	}
 	//verify the exts
 	for (unsigned i = 0; i < n_exts; i++) {
-		bool found = false;
-		for (unsigned j = 0; j < n_found_exts; j++) {
-			if (strcmp(has_exts[j].extensionName, exts[i]) == 0) {
-				found = true;
-				break;
-			}
-		}
-		if (!found)
-			return 0;
+		if (!check_ext(exts[i], n_found_exts, has_exts))
+			return false;
 	}
 	return n_exts;
+}
+
+static VkInstance
+create_instance(const struct tw_vk_option *opt)
+{
+	VkApplicationInfo app_info = {0};
+	VkInstanceCreateInfo create_info = {0};
+	char *exts[MAX_EXTS] = {0};
+	size_t n_exts = 0;
+	VkInstance instance = VK_NULL_HANDLE;
+
+	app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+	app_info.pApplicationName = opt->instance_name;
+	app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+	app_info.pEngineName = "No Engine";
+	app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+	app_info.apiVersion = VK_API_VERSION_1_1; //need for external_* exts
+
+	create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+	create_info.pApplicationInfo = &app_info;
+	create_info.enabledLayerCount = 0;
+	if (opt->requested_exts & TW_VK_WANT_VALIDATION_LAYER) {
+		const char *layers[1] = { VALIDARION_LAYER_NAME };
+
+		create_info.enabledLayerCount = NUMOF(layers);
+		create_info.ppEnabledLayerNames = layers;
+	}
+	if ((n_exts = enum_instance_exts(exts, opt)) == 0)
+	    return false;
+	create_info.enabledExtensionCount = n_exts;
+	create_info.ppEnabledExtensionNames = (const char * const *)exts;
+
+	vkCreateInstance(&create_info, NULL, &instance);
+
+	return instance;
 }
 
 static uint64_t
@@ -149,39 +221,66 @@ find_phy_dev(uint64_t *alignment, const struct tw_vk_option *opt,
 	return phy_dev;
 }
 
-static VkInstance
-create_instance(const struct tw_vk_option *opt)
+static bool
+check_device_exts(const VkPhysicalDevice pdev, bool *has_modifiers)
 {
-	VkApplicationInfo app_info = {0};
-	VkInstanceCreateInfo create_info = {0};
-	char *exts[MAX_EXTS] = {0};
-	size_t n_exts = 0;
-	VkInstance instance = VK_NULL_HANDLE;
+	uint32_t n_exts = 0;
+	bool has_dmabuf = true;
 
-	app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-	app_info.pApplicationName = opt->instance_name;
-	app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-	app_info.pEngineName = "No Engine";
-	app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-	app_info.apiVersion = VK_API_VERSION_1_1; //need for external_* exts
+	vkEnumerateDeviceExtensionProperties(pdev, NULL, &n_exts, NULL);
+	VkExtensionProperties pexts[n_exts+1];
+	vkEnumerateDeviceExtensionProperties(pdev, NULL, &n_exts, pexts);
+	qsort(pexts, n_exts, sizeof(pexts[0]), ext_names_cmp);
 
-	create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-	create_info.pApplicationInfo = &app_info;
-	create_info.enabledLayerCount = 0;
-	if (opt->requested_exts & TW_VK_WANT_VALIDATION_LAYER) {
-		const char *layers[1] = { VALIDARION_LAYER_NAME };
-
-		create_info.enabledLayerCount = NUMOF(layers);
-		create_info.ppEnabledLayerNames = layers;
+	for (unsigned i = 0; i < NUMOF(basic_dev_exts); i++) {
+		has_dmabuf = has_dmabuf &&
+			check_ext(basic_dev_exts[i], n_exts, pexts);
 	}
-	if ((n_exts = enum_instance_exts(exts, opt)) == 0)
-	    return false;
-	create_info.enabledExtensionCount = n_exts;
-	create_info.ppEnabledExtensionNames = (const char * const *)exts;
 
-	vkCreateInstance(&create_info, NULL, &instance);
+	//check modifiers
+	*has_modifiers = has_dmabuf;
+	for (unsigned i = 0; i < NUMOF(dma_modifiers_exts); i++) {
+		*has_modifiers = *has_modifiers &&
+			check_ext(dma_modifiers_exts[i], n_exts, pexts);
+	}
+	return has_dmabuf;
+}
 
-	return instance;
+static VkDevice
+create_logical_device(const struct tw_vk_option *opt,
+                      const VkInstance instance, const VkPhysicalDevice pdev)
+{
+	bool has_modifiers = true;
+	float priority = 1.0f;
+	VkDevice dev;
+	VkDeviceQueueCreateInfo que_info = {0};
+	VkDeviceCreateInfo info = {0};
+	uint32_t n_exts = NUMOF(basic_dev_exts);
+	char *exts[NUMOF(basic_dev_exts)+NUMOF(dma_modifiers_exts)];
+
+	if (!check_device_exts(pdev, &has_modifiers))
+		return VK_NULL_HANDLE;
+	memcpy(exts, basic_dev_exts, sizeof(basic_dev_exts));
+	if (has_modifiers) {
+		memcpy(exts+n_exts, dma_modifiers_exts,
+		       NUMOF(dma_modifiers_exts));
+		n_exts += NUMOF(dma_modifiers_exts);
+	}
+
+	que_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+	que_info.queueCount = 1;
+	que_info.pQueuePriorities = &priority;
+
+	info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+	info.queueCreateInfoCount = 1;
+	info.pQueueCreateInfos = &que_info;
+	info.enabledExtensionCount = n_exts;
+	info.ppEnabledExtensionNames = (const char * const *)exts;
+
+	if (vkCreateDevice(pdev, &info, NULL, &dev) != VK_SUCCESS)
+		return VK_NULL_HANDLE;
+
+	return dev;
 }
 
 WL_EXPORT bool
@@ -202,6 +301,10 @@ tw_vk_init(struct tw_vk *vk, const struct tw_vk_option *opt)
 	if (vk->phydev == VK_NULL_HANDLE)
 		goto err_dev;
 
+	vk->device = create_logical_device(opt, vk->instance, vk->phydev);
+	if (vk->device == VK_NULL_HANDLE)
+		goto err_dev;
+
 	return ret == VK_SUCCESS;
 err_dev:
 	vkDestroyInstance(vk->instance, NULL);
@@ -211,5 +314,6 @@ err_dev:
 WL_EXPORT void
 tw_vk_fini(struct tw_vk *vk)
 {
+	vkDestroyDevice(vk->device, NULL);
 	vkDestroyInstance(vk->instance, NULL);
 }

@@ -52,6 +52,8 @@ struct tw_vk {
 
 	VkInstance instance;
 	VkPhysicalDevice phydev;
+	VkDevice device;
+
 	unsigned int internal_format;
 	uint64_t min_extmem_alignment;
 	struct tw_drm_formats drm_formats;
