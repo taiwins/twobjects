@@ -287,6 +287,18 @@ create_logical_device(const struct tw_vk_option *opt,
 	return dev;
 }
 
+static inline VkCommandPool
+create_cmd_pool(VkDevice dev)
+{
+	VkCommandPool pool = VK_NULL_HANDLE;
+	VkCommandPoolCreateInfo info = {0};
+
+	info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	if (vkCreateCommandPool(dev, &info, NULL, &pool) != VK_SUCCESS)
+		return VK_NULL_HANDLE;
+	return pool;
+}
+
 WL_EXPORT bool
 tw_vk_init(struct tw_vk *vk, const struct tw_vk_option *opt)
 {
@@ -304,12 +316,24 @@ tw_vk_init(struct tw_vk *vk, const struct tw_vk_option *opt)
 	                          vk->instance);
 	if (vk->phydev == VK_NULL_HANDLE)
 		goto err_dev;
+	//TODO: get queue family that support graphics and transfer
 
 	vk->device = create_logical_device(opt, vk->instance, vk->phydev);
 	if (vk->device == VK_NULL_HANDLE)
 		goto err_dev;
 
+	vkGetDeviceQueue(vk->device, 0, 0, &vk->queue);
+	if (vk->queue == VK_NULL_HANDLE)
+		goto err_queue;
+
+	vk->cmd_pool = create_cmd_pool(vk->device);
+	if (vk->cmd_pool == VK_NULL_HANDLE)
+		goto err_cmd_pool;
+
 	return ret == VK_SUCCESS;
+err_cmd_pool:
+err_queue:
+	vkDestroyDevice(vk->device, NULL);
 err_dev:
 	vkDestroyInstance(vk->instance, NULL);
 	return false;
@@ -318,6 +342,7 @@ err_dev:
 WL_EXPORT void
 tw_vk_fini(struct tw_vk *vk)
 {
+	vkDestroyCommandPool(vk->device, vk->cmd_pool, NULL);
 	vkDestroyDevice(vk->device, NULL);
 	vkDestroyInstance(vk->instance, NULL);
 }

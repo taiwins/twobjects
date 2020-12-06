@@ -24,6 +24,7 @@
 
 #include <stdint.h>
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_core.h>
 #include <wayland-server.h>
 
 #include "dmabuf.h"
@@ -53,6 +54,8 @@ struct tw_vk {
 	VkInstance instance;
 	VkPhysicalDevice phydev;
 	VkDevice device;
+	VkQueue queue;
+	VkCommandPool cmd_pool;
 
 	unsigned int internal_format;
 	uint64_t min_extmem_alignment;
