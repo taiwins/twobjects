@@ -141,6 +141,7 @@ create_instance(const struct tw_vk_option *opt)
 	char *exts[MAX_EXTS] = {0};
 	size_t n_exts = 0;
 	VkInstance instance = VK_NULL_HANDLE;
+	const char *layers[1] = { VALIDARION_LAYER_NAME };
 
 	app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 	app_info.pApplicationName = opt->instance_name;
@@ -153,8 +154,6 @@ create_instance(const struct tw_vk_option *opt)
 	create_info.pApplicationInfo = &app_info;
 	create_info.enabledLayerCount = 0;
 	if (opt->requested_exts & TW_VK_WANT_VALIDATION_LAYER) {
-		const char *layers[1] = { VALIDARION_LAYER_NAME };
-
 		create_info.enabledLayerCount = NUMOF(layers);
 		create_info.ppEnabledLayerNames = layers;
 	}
@@ -257,6 +256,7 @@ create_logical_device(const struct tw_vk_option *opt,
 	VkDeviceCreateInfo info = {0};
 	uint32_t n_exts = NUMOF(basic_dev_exts);
 	char *exts[NUMOF(basic_dev_exts)+NUMOF(dma_modifiers_exts)];
+	const char *layers[1] = { VALIDARION_LAYER_NAME };
 
 	if (!check_device_exts(pdev, &has_modifiers))
 		return VK_NULL_HANDLE;
@@ -276,6 +276,10 @@ create_logical_device(const struct tw_vk_option *opt,
 	info.pQueueCreateInfos = &que_info;
 	info.enabledExtensionCount = n_exts;
 	info.ppEnabledExtensionNames = (const char * const *)exts;
+	if (opt->requested_exts & TW_VK_WANT_VALIDATION_LAYER) {
+		info.enabledLayerCount = NUMOF(layers);
+		info.ppEnabledLayerNames = layers;
+	}
 
 	if (vkCreateDevice(pdev, &info, NULL, &dev) != VK_SUCCESS)
 		return VK_NULL_HANDLE;
