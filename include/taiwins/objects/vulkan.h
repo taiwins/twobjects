@@ -39,6 +39,13 @@ enum tw_vk_want_ext {
 	TW_VK_WANT_DIRECT_MODE_DISPLAY = (1 << 1),
 };
 
+enum tw_vk_queue_type {
+	TW_VK_QUE_GRAPHICS = 0,
+	TW_VK_QUE_COMPUTE = 1,
+	TW_VK_QUE_TRANSFER = 2,
+	TW_VK_QUE_COUNT = 3,
+};
+
 struct tw_vk_option {
 	const char *instance_name;
 	uint32_t requested_exts;
@@ -54,7 +61,8 @@ struct tw_vk {
 	VkInstance instance;
 	VkPhysicalDevice phydev;
 	VkDevice device;
-	VkQueue queue;
+	/** graphics, compute and transfer queue, could be the same */
+	VkQueue gque, tque, cque;
 	VkCommandPool cmd_pool;
 
 	unsigned int internal_format;

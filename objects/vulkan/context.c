@@ -221,6 +221,33 @@ find_phy_dev(uint64_t *alignment, const struct tw_vk_option *opt,
 }
 
 static bool
+find_dev_queue_families(const VkPhysicalDevice dev,
+                        int indices[TW_VK_QUE_COUNT])
+{
+	uint32_t n_fams = 0;
+	vkGetPhysicalDeviceQueueFamilyProperties(dev, &n_fams, NULL);
+	VkQueueFamilyProperties fams[n_fams+1];
+	vkGetPhysicalDeviceQueueFamilyProperties(dev, &n_fams, fams);
+
+	for (unsigned i = 0; i < n_fams; i++) {
+		if ((fams[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+		    fams[i].queueCount > 0 &&
+		    indices[TW_VK_QUE_GRAPHICS] < 0)
+			indices[TW_VK_QUE_GRAPHICS] = i;
+		if ((fams[i].queueFlags & VK_QUEUE_COMPUTE_BIT) &&
+		    fams[i].queueCount > 0 &&
+		    indices[TW_VK_QUE_COMPUTE] < 0)
+			indices[TW_VK_QUE_COMPUTE] = i;
+		if ((fams[i].queueFlags & VK_QUEUE_TRANSFER_BIT) &&
+		    fams[i].queueCount > 0 &&
+		    indices[TW_VK_QUE_TRANSFER] < 0)
+			indices[TW_VK_QUE_TRANSFER] = i;
+	}
+	return indices[TW_VK_QUE_GRAPHICS] >= 0 &&
+		indices[TW_VK_QUE_TRANSFER] >= 0;
+}
+
+static bool
 check_device_exts(const VkPhysicalDevice pdev, bool *has_modifiers)
 {
 	uint32_t n_exts = 0;
@@ -245,14 +272,39 @@ check_device_exts(const VkPhysicalDevice pdev, bool *has_modifiers)
 	return has_dmabuf;
 }
 
+static int
+write_queue_create_info(VkDeviceQueueCreateInfo infos[TW_VK_QUE_COUNT],
+                       int fams[TW_VK_QUE_COUNT])
+{
+	static const float priority = 1.0;
+	int n_ques = 0, cidx = fams[TW_VK_QUE_COMPUTE];
+
+	for (unsigned i = 0; i < TW_VK_QUE_COUNT; i++) {
+		infos[i].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+		infos[i].queueCount = 1;
+		infos[i].pQueuePriorities = &priority;
+	}
+	infos[TW_VK_QUE_GRAPHICS].queueFamilyIndex = fams[TW_VK_QUE_GRAPHICS];
+	infos[TW_VK_QUE_TRANSFER].queueFamilyIndex = fams[TW_VK_QUE_TRANSFER];
+	n_ques = fams[TW_VK_QUE_GRAPHICS] == fams[TW_VK_QUE_TRANSFER] ? 1 : 2;
+	//compute
+	if (cidx >= 0) {
+		infos[TW_VK_QUE_COMPUTE].queueFamilyIndex = cidx;
+		n_ques += (cidx == fams[TW_VK_QUE_GRAPHICS] ||
+		           cidx == fams[TW_VK_QUE_TRANSFER]) ? 0 : 1;
+	}
+	return n_ques;
+}
+
 static VkDevice
 create_logical_device(const struct tw_vk_option *opt,
-                      const VkInstance instance, const VkPhysicalDevice pdev)
+                      const VkInstance instance, const VkPhysicalDevice pdev,
+                      int que_families[TW_VK_QUE_COUNT])
 {
 	bool has_modifiers = true;
-	float priority = 1.0f;
+	int n_ques = 0;
 	VkDevice dev;
-	VkDeviceQueueCreateInfo que_info = {0};
+	VkDeviceQueueCreateInfo que_info[TW_VK_QUE_COUNT] = {{0},{0},{0}};
 	VkDeviceCreateInfo info = {0};
 	uint32_t n_exts = NUMOF(basic_dev_exts);
 	char *exts[NUMOF(basic_dev_exts)+NUMOF(dma_modifiers_exts)];
@@ -267,13 +319,11 @@ create_logical_device(const struct tw_vk_option *opt,
 		n_exts += NUMOF(dma_modifiers_exts);
 	}
 
-	que_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-	que_info.queueCount = 1;
-	que_info.pQueuePriorities = &priority;
+	n_ques = write_queue_create_info(que_info, que_families);
 
 	info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-	info.queueCreateInfoCount = 1;
-	info.pQueueCreateInfos = &que_info;
+	info.queueCreateInfoCount = n_ques;
+	info.pQueueCreateInfos = que_info;
 	info.enabledExtensionCount = n_exts;
 	info.ppEnabledExtensionNames = (const char * const *)exts;
 	if (opt->requested_exts & TW_VK_WANT_VALIDATION_LAYER) {
@@ -303,6 +353,7 @@ WL_EXPORT bool
 tw_vk_init(struct tw_vk *vk, const struct tw_vk_option *opt)
 {
 	VkResult ret = VK_SUCCESS;
+	int queue_families[TW_VK_QUE_COUNT] = { -1, -1, -1};
 
 	if ((opt->requested_exts & TW_VK_WANT_VALIDATION_LAYER) &&
 	    !layer_supported(VALIDARION_LAYER_NAME))
@@ -316,15 +367,23 @@ tw_vk_init(struct tw_vk *vk, const struct tw_vk_option *opt)
 	                          vk->instance);
 	if (vk->phydev == VK_NULL_HANDLE)
 		goto err_dev;
-	//TODO: get queue family that support graphics and transfer
+	if (!find_dev_queue_families(vk->phydev, queue_families))
+		goto err_dev;
 
-	vk->device = create_logical_device(opt, vk->instance, vk->phydev);
+	vk->device = create_logical_device(opt, vk->instance, vk->phydev,
+	                                   queue_families);
 	if (vk->device == VK_NULL_HANDLE)
 		goto err_dev;
 
-	vkGetDeviceQueue(vk->device, 0, 0, &vk->queue);
-	if (vk->queue == VK_NULL_HANDLE)
+	vkGetDeviceQueue(vk->device, queue_families[TW_VK_QUE_GRAPHICS], 0,
+	                 &vk->gque);
+	vkGetDeviceQueue(vk->device, queue_families[TW_VK_QUE_TRANSFER], 0,
+	                 &vk->tque);
+	if (vk->gque == VK_NULL_HANDLE || vk->tque == VK_NULL_HANDLE)
 		goto err_queue;
+	if (queue_families[TW_VK_QUE_COMPUTE] >= 0)
+		vkGetDeviceQueue(vk->device, queue_families[TW_VK_QUE_COMPUTE],
+		                 0, &vk->cque);
 
 	vk->cmd_pool = create_cmd_pool(vk->device);
 	if (vk->cmd_pool == VK_NULL_HANDLE)
