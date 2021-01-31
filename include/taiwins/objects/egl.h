@@ -29,6 +29,7 @@
 #include <string.h>
 #include <wayland-server.h>
 #include <wayland-util.h>
+#include <pixman.h>
 
 #include "dmabuf.h"
 #include "drm_formats.h"
@@ -93,6 +94,9 @@ tw_egl_bind_wl_display(struct tw_egl *egl, struct wl_display *display);
 bool
 tw_egl_destroy_image(struct tw_egl *egl, EGLImageKHR image);
 
+bool
+tw_egl_swap_buffer(struct tw_egl *egl, EGLSurface surface,
+                   pixman_region32_t *damage);
 bool
 tw_egl_query_wl_buffer(struct tw_egl *egl, struct wl_resource *buffer,
                        EGLint attribute, EGLint *value);
