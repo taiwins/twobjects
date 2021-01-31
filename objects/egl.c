@@ -26,6 +26,7 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <EGL/eglplatform.h>
+#include <wayland-client-protocol.h>
 #ifdef HAVE_EGLMESAEXT
 #include <EGL/eglmesaext.h>
 #endif
@@ -40,11 +41,13 @@
 #include <unistd.h>
 #include <wayland-server.h>
 #include <drm_fourcc.h>
+#include <pixman.h>
 
 #include <taiwins/objects/logger.h>
 #include <taiwins/objects/dmabuf.h>
 #include <taiwins/objects/drm_formats.h>
 #include <taiwins/objects/egl.h>
+#include <taiwins/objects/matrix.h>
 
 //we need EGL context here mostly just for import buffer and export buffers.
 static PFNEGLGETPLATFORMDISPLAYEXTPROC _get_platform_display = NULL;
@@ -594,6 +597,46 @@ tw_egl_create_window_surface(struct tw_egl *egl, void *native_surface,
 	assert(_create_window_surface);
 	return _create_window_surface(egl->display, egl->config,
 	                              native_surface, attrib_list);
+}
+
+WL_EXPORT bool
+tw_egl_swap_buffer(struct tw_egl *egl, EGLSurface surface,
+                   pixman_region32_t *damages)
+{
+	EGLBoolean ret;
+	//never block when swapping buffers on Wayland
+	if (egl->platform == EGL_PLATFORM_WAYLAND_EXT)
+		eglSwapInterval(egl->display, 0);
+
+	if (damages && _swap_buffer_with_damage) {
+		EGLint width = 0, height = 0;
+		int nrects = 0;
+		struct tw_mat3 flip;
+		pixman_box32_t rect;
+		pixman_box32_t *rects = (damages) ?
+			pixman_region32_rectangles(damages, &nrects) : NULL;
+		EGLint egl_damage[4 * nrects + 1];
+
+		eglQuerySurface(egl->display, surface, EGL_WIDTH, &width);
+		eglQuerySurface(egl->display, surface, EGL_HEIGHT, &height);
+		tw_mat3_flip_y(&flip, height);
+
+		for (int i = 0; i < nrects; i++) {
+			tw_mat3_box_transform(&flip, &rect, &rects[i]);
+			egl_damage[4 * i] = rect.x1;
+			egl_damage[4 * i + 1] = rect.y1;
+			egl_damage[4 * i + 2] = rect.x2 - rect.x1;
+			egl_damage[4 * i + 3] = rect.y2 - rect.y1;
+		}
+		if (nrects == 0)
+			ret = eglSwapBuffers(egl->display, surface);
+		else
+			ret = _swap_buffer_with_damage(egl->display, surface,
+			                               egl_damage, nrects);
+	} else {
+		ret = eglSwapBuffers(egl->display, surface);
+	}
+	return ret == EGL_TRUE;
 }
 
 WL_EXPORT EGLImageKHR

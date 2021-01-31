@@ -80,6 +80,13 @@ void
 tw_mat3_wl_transform(struct tw_mat3 *dst,
                      enum wl_output_transform transform, bool yup);
 /**
+ * @brief This ia a shortcut for clipping the coordinates from wayland to GL or
+ * vice-versa.
+ */
+void
+tw_mat3_flip_y(struct tw_mat3 *dst, float height);
+
+/**
  * @breif transform a (0, 0, width, height) by its size
  *
  * the (width, height) here is needed to move the rect back to origin after
