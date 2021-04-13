@@ -245,6 +245,14 @@ tw_mat3_wl_transform(struct tw_mat3 *dst,
 }
 
 WL_EXPORT void
+tw_mat3_flip_y(struct tw_mat3 *dst, float h)
+{
+	dst->d[0] = 1.0; dst->d[1] =  0.0; dst->d[2] = 0.0;
+	dst->d[3] = 0.0; dst->d[4] = -1.0; dst->d[5] = 0.0;
+	dst->d[6] = 0.0; dst->d[7] =  h;   dst->d[8] = 1.0;
+}
+
+WL_EXPORT void
 tw_mat3_transform_rect(struct tw_mat3 *dst, bool yup,
                        enum wl_output_transform transform,
                        uint32_t width, uint32_t height, uint32_t scale)
