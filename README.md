@@ -1,5 +1,8 @@
 ## Taiwins wayland objects library
 
+The twobject library is merged back inside libtaiwins. This library is no longer 
+needed. Objects lives under `libtaiwins/objects`.
+
 This library implements basic wayland protocols as well as various other wayland
 protocols like 'xdg-shell' and 'linux-dmabuf'. The library is designed to be
 backend agnostic and autonomous. That is, it does not depend on a wayland
