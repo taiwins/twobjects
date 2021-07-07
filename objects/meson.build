@@ -52,6 +52,7 @@ taiwins_obj_srcs = [
   'drm_formats.c',
   'egl.c',
   'gestures.c',
+  'vulkan/context.c',
 
   wayland_linux_dmabuf_server_protocol_h,
   wayland_linux_dmabuf_private_code_c,
@@ -79,6 +80,7 @@ twobjects_deps = [
     dep_m,
     dep_egl,
     dep_glesv2,
+    dep_vulkan,
 ]
 
 lib_twobjects = both_libraries(

@@ -32,9 +32,11 @@ dep_libdrm = dependency('libdrm', version: '>= 2.4.68')
 dep_m = cc.find_library('m')
 dep_glesv2 = dependency('glesv2')
 dep_egl = dependency('egl')
+dep_vulkan = dependency('vulkan', version: '>=1.1')
 
 twobjects_inc = include_directories('include')
 
 subdir('include')
 subdir('protocols')
 subdir('objects')
+subdir('test')
